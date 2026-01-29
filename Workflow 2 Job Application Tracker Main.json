@@ -1,0 +1,617 @@
+{
+  "name": "Job Application Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "5f15c9a9-cad1-49ab-8e02-9e0cc2b4c02c",
+      "name": "Run Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      jobId: \"TEST-001\",\n      title: \"Test Software Engineer\",\n      company: \"Test Company\",\n      location: \"Remote\",\n      url: \"https://example.com\",\n      source: \"LinkedIn\",\n      datePosted: \"2026-01-23\",\n      dateFound: \"2026-01-23\",\n      status: \"New\",\n      applied: \"No\",\n      salary: \"\",\n      notes: \"\"\n    }\n  },\n  {\n    json: {\n      jobId: \"TEST-002\",\n      title: \"Test Backend Developer\",\n      company: \"Another Company\",\n      location: \"Remote\",\n      url: \"https://example.com/2\",\n      source: \"LinkedIn\",\n      datePosted: \"2026-01-23\",\n      dateFound: \"2026-01-23\",\n      status: \"New\",\n      applied: \"No\",\n      salary: \"\",\n      notes: \"\"\n    }\n  }\n];\n"
+      },
+      "id": "0d7f2710-f5e1-473e-91d2-e535c17084a9",
+      "name": "Parse LinkedIn",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Indeed jobs from HTML\nconst html = items[0].json.data || '';\nconst jobs = [];\nconst config = $node['Configure Search'].json;\n\n// Extract job cards\nconst jobMatches = html.matchAll(/<div[^>]*class=\"[^\"]*job_seen_beacon[^\"]*\"[^>]*data-jk=\"([^\"]+)\"[^>]*>([\\s\\S]*?)<\\/div>/g);\n\nfor (const match of jobMatches) {\n  const jobId = match[1];\n  const jobHtml = match[2];\n  \n  const titleMatch = jobHtml.match(/<h2[^>]*class=\"jobTitle\"[^>]*>.*?<span[^>]*title=\"([^\"]+)\"/);\n  const companyMatch = jobHtml.match(/<span[^>]*class=\"companyName\"[^>]*>([^<]+)<\\/span>/);\n  const locationMatch = jobHtml.match(/<div[^>]*class=\"companyLocation\"[^>]*>([^<]+)<\\/div>/);\n  const salaryMatch = jobHtml.match(/<div[^>]*class=\"metadata salary-snippet-container\"[^>]*>([^<]+)<\\/div>/);\n  \n  if (titleMatch && companyMatch) {\n    const title = titleMatch[1].trim();\n    \n    const isExcluded = config.excluded.some(word => \n      title.toLowerCase().includes(word.toLowerCase())\n    );\n    \n    if (!isExcluded && jobs.length < 15) {\n      jobs.push({\n        jobId: `IN-${jobId}`,\n        title: title,\n        company: companyMatch[1].trim(),\n        location: locationMatch ? locationMatch[1].trim() : config.location,\n        url: `https://www.indeed.com/viewjob?jk=${jobId}`,\n        source: 'Indeed',\n        datePosted: new Date().toISOString().split('T')[0],\n        dateFound: new Date().toISOString().split('T')[0],\n        status: 'New',\n        applied: 'No',\n        salary: salaryMatch ? salaryMatch[1].trim() : 'Not specified',\n        notes: ''\n      });\n    }\n  }\n}\n\nreturn jobs.map(job => ({ json: job }));"
+      },
+      "id": "39147529-5666-492f-8c15-2d61748b295d",
+      "name": "Parse Indeed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        128
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Remotive API response\nconst response = items[0].json;\nconst jobs = [];\nconst config = $node['Configure Search'].json;\n\nif (response.jobs && Array.isArray(response.jobs)) {\n  for (const job of response.jobs.slice(0, 15)) {\n    const title = job.title || '';\n    \n    const isExcluded = config.excluded.some(word => \n      title.toLowerCase().includes(word.toLowerCase())\n    );\n    \n    if (!isExcluded) {\n      jobs.push({\n        jobId: `RM-${job.id}`,\n        title: title,\n        company: job.company_name || 'Unknown',\n        location: 'Remote',\n        url: job.url || '',\n        source: 'Remotive',\n        datePosted: job.publication_date ? job.publication_date.split('T')[0] : new Date().toISOString().split('T')[0],\n        dateFound: new Date().toISOString().split('T')[0],\n        status: 'New',\n        applied: 'No',\n        salary: job.salary || 'Not specified',\n        notes: job.job_type || ''\n      });\n    }\n  }\n}\n\nreturn jobs.map(job => ({ json: job }));"
+      },
+      "id": "80847e4a-b111-42c0-89ee-13f7b58eb91b",
+      "name": "Parse Remotive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        288
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "id": "b7dcedd0-3e88-42db-8103-2547abe74da9",
+      "name": "Merge All Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        400,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Remove duplicate jobs based on jobId\nconst uniqueJobs = [];\nconst seenIds = new Set();\n\nfor (const item of items) {\n  const jobId = item.json.jobId;\n  if (!seenIds.has(jobId)) {\n    seenIds.add(jobId);\n    uniqueJobs.push(item);\n  }\n}\n\nreturn uniqueJobs;"
+      },
+      "id": "0bec03ad-4001-4638-b4d4-534334a4952b",
+      "name": "Remove Duplicates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create email summary\nconst allJobs = items;\nconst newJobs = allJobs.filter(item => item.json.status === 'New');\n\n// Group by source\nconst bySource = {};\nfor (const job of newJobs) {\n  const source = job.json.source;\n  if (!bySource[source]) bySource[source] = [];\n  bySource[source].push(job.json);\n}\n\n// Create HTML email\nlet emailHtml = `\n<div style=\"font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;\">\n  <h1 style=\"color: #2563eb;\">🎯 ${newJobs.length} New Job Opportunities!</h1>\n  <p style=\"font-size: 16px; color: #666;\">Found on ${new Date().toLocaleDateString()}</p>\n  <hr style=\"border: 1px solid #e5e7eb;\">\n`;\n\nfor (const [source, jobs] of Object.entries(bySource)) {\n  emailHtml += `\n  <h2 style=\"color: #1f2937; margin-top: 30px;\">${source} (${jobs.length})</h2>\n  <ul style=\"list-style: none; padding: 0;\">\n  `;\n  \n  for (const job of jobs.slice(0, 5)) {\n    emailHtml += `\n    <li style=\"background: #f9fafb; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #2563eb;\">\n      <h3 style=\"margin: 0 0 5px 0; color: #1f2937;\">${job.title}</h3>\n      <p style=\"margin: 5px 0; color: #6b7280;\"><strong>Company:</strong> ${job.company}</p>\n      <p style=\"margin: 5px 0; color: #6b7280;\"><strong>Location:</strong> ${job.location}</p>\n      ${job.salary !== 'Not specified' ? `<p style=\"margin: 5px 0; color: #059669;\"><strong>Salary:</strong> ${job.salary}</p>` : ''}\n      <a href=\"${job.url}\" style=\"display: inline-block; margin-top: 10px; padding: 8px 16px; background: #2563eb; color: white; text-decoration: none; border-radius: 4px;\">Apply Now →</a>\n    </li>\n    `;\n  }\n  \n  emailHtml += `</ul>`;\n}\n\nemailHtml += `\n  <hr style=\"border: 1px solid #e5e7eb; margin-top: 30px;\">\n  <p style=\"color: #6b7280; font-size: 14px;\">📊 Check your <strong>Google Sheet</strong> for the complete list with all ${newJobs.length} jobs!</p>\n  <p style=\"color: #9ca3af; font-size: 12px;\">This is an automated message from your Job Tracker workflow.</p>\n</div>\n`;\n\nreturn [{\n  json: {\n    totalJobs: newJobs.length,\n    sources: Object.keys(bySource),\n    emailBody: emailHtml,\n    subject: `🎯 ${newJobs.length} New Jobs Found - ${new Date().toLocaleDateString()}`\n  }\n}];"
+      },
+      "id": "9e80da7d-c1dd-4ebc-bbff-252e9feca7fb",
+      "name": "Create Email Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c2fb0904-d125-4d7b-b8dd-26ea7b916990",
+              "leftValue": "jobId",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        784,
+        48
+      ],
+      "id": "f62e133f-5549-44e0-a0c6-26209af90c68",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7cbc6a9f-9ae4-4d93-9628-91929b9fcd70",
+              "name": "jobId",
+              "value": "={{ $json.jobId }}",
+              "type": "string"
+            },
+            {
+              "id": "a0158d72-8b25-4745-99dd-e07143952750",
+              "name": "title",
+              "value": "={{ $json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "40339173-6f30-407b-b0df-99fb2b9dadb7",
+              "name": "company",
+              "value": "={{ $json.company }}",
+              "type": "string"
+            },
+            {
+              "id": "6ebf40ec-7ffc-4706-ae4e-5a815c584091",
+              "name": "location",
+              "value": "={{ $json.location }}",
+              "type": "string"
+            },
+            {
+              "id": "e8a2d406-e31c-44f4-a8bd-88a139d581fd",
+              "name": "url",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "6535a537-4b81-4cfc-96f5-a0f80edc8cc5",
+              "name": "source",
+              "value": "={{ $json.source }}",
+              "type": "string"
+            },
+            {
+              "id": "04c1c0c0-6729-4bdd-9ee4-50e686f0a31e",
+              "name": "datePosted",
+              "value": "={{ $json.datePosted }}",
+              "type": "string"
+            },
+            {
+              "id": "d7d32beb-fe7f-41a9-9835-b85863d8b60c",
+              "name": "dateFound",
+              "value": "={{ $json.dateFound }}",
+              "type": "string"
+            },
+            {
+              "id": "ea1aad4f-9539-4206-8097-1f0f9cdbfab5",
+              "name": "status",
+              "value": "={{ $json.status }}",
+              "type": "string"
+            },
+            {
+              "id": "cd72f7a8-c356-4e7f-85bf-ec868aeca5c7",
+              "name": "applied",
+              "value": "={{ $json.applied }}",
+              "type": "string"
+            },
+            {
+              "id": "7ec7b5c0-c9c4-489c-80ed-204e435fc817",
+              "name": "salary",
+              "value": "={{ $json.salary }}",
+              "type": "string"
+            },
+            {
+              "id": "5bba682a-160e-4476-95ea-6c2f8d9326b5",
+              "name": "notes",
+              "value": "={{ $json.notes }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        784,
+        256
+      ],
+      "id": "da2417b0-549b-45fa-af48-5b759f0882d5",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "sendTo": "trendies44@gmail.com ",
+        "subject": "=New Jobs Found – {{$now.format('dd LLL yyyy')}}",
+        "message": "={{$json.emailBody}}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1392,
+        128
+      ],
+      "id": "9c17627a-0031-4b2d-b932-4e813b15bc5b",
+      "name": "Send a message",
+      "webhookId": "d709cc75-f121-4877-95f9-915419c29a07",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "JMddV7suLbFLAN46",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={{ encodeURIComponent($json.keywords[0]) }}&location={{ encodeURIComponent($json.location) }}&f_E=2&f_TPR=r86400&start=0",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "0d9ecb7c-8ef2-4627-b2ea-bc208c30a8eb",
+      "name": "LinkedIn Scraper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// JOB SEARCH CONFIGURATION\n// Edit these settings for your job search\n// ========================================\n\nconst config = {\n  // Job titles to search for\n  keywords: [\n    \"software engineer\",\n    \"full stack developer\",\n    \"backend developer\",\n    \"python developer\",\n    \"react developer\",\n    \"nodejs developer\"\n  ],\n  \n  // Location preferences\n  location: \"Remote\",\n  // Alternative: \"New York\", \"San Francisco\", \"London\", etc.\n  \n  // Experience level\n  experienceLevel: \"entry level\",\n  // Options: \"entry level\", \"junior\", \"mid level\", \"senior\"\n  \n  // Words to EXCLUDE from job titles\n  excluded: [\n    \"senior\",\n    \"lead\",\n    \"principal\",\n    \"staff\",\n    \"architect\",\n    \"manager\",\n    \"director\",\n    \"5+ years\",\n    \"8+ years\"\n  ],\n  \n  // Minimum salary (optional, 0 = no minimum)\n  minSalary: 0,\n  \n  // Company size preference\n  companySize: \"any\", // Options: \"startup\", \"medium\", \"large\", \"any\"\n  \n  // Your email for notifications\n  email: \"your-email@gmail.com\"\n};\n\nreturn [{ json: config }];"
+      },
+      "id": "a67a3cb0-fe62-43dc-bce6-01b49c8fbeff",
+      "name": "Configure Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://remotive.com/api/remote-jobs?search={{ encodeURIComponent($node['Configure Search'].json.keywords[0]) }}&limit=10",
+        "options": {}
+      },
+      "id": "57592347-f57e-4464-9f43-9910af7cb070",
+      "name": "Remotive API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1BuLfYsRUGB24P1q68FBIGn98_N7D_e2iceK3dppZaCE"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "jobId": "={{ $json.jobId }}",
+            "title": "={{ $json.title }}",
+            "company": "={{ $json.company }}",
+            "url": "={{ $json.url }}",
+            "source": "={{ $json.source }}",
+            "datePosted": "={{ $json.datePosted }}",
+            "dateFound": "={{ $json.dateFound }}",
+            "status": "={{ $json.status }}",
+            "applied": "={{ $json.applied }}",
+            "salary": "={{ $json.salary }}",
+            "notes": "={{ $json.notes }}",
+            " location": "={{ $json.location }}"
+          },
+          "matchingColumns": [
+            "jobId"
+          ],
+          "schema": [
+            {
+              "id": "jobId",
+              "displayName": "jobId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": " location",
+              "displayName": " location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "datePosted",
+              "displayName": "datePosted",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dateFound",
+              "displayName": "dateFound",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "applied",
+              "displayName": "applied",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "salary",
+              "displayName": "salary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED",
+          "useAppend": false
+        }
+      },
+      "id": "dda72e69-794e-47f9-9a98-e82c906029c0",
+      "name": "Save to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        976,
+        128
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "PWwg78PYGuEueLeZ",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Run Every 6 Hours": {
+      "main": [
+        [
+          {
+            "node": "Configure Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Indeed": {
+      "main": [
+        [
+          {
+            "node": "Merge All Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge All Sources": {
+      "main": [
+        [
+          {
+            "node": "Remove Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Duplicates": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Email Summary": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "Save to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn Scraper": {
+      "main": [
+        [
+          {
+            "node": "Parse LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configure Search": {
+      "main": [
+        [
+          {
+            "node": "LinkedIn Scraper",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Remotive API",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Parse Indeed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remotive API": {
+      "main": [
+        [
+          {
+            "node": "Parse Remotive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Create Email Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c758cf95-4e43-4948-8586-00d9d4d0e13f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a93ab2a9ebb085ea1c55b0cefdcd8190cba574c15e0d35eef4e0b1c80df87c8e"
+  },
+  "id": "V4ZFIdn6z7ZnJN6B",
+  "tags": []
+}
