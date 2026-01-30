@@ -45,6 +45,7 @@ Filtering Logic
 Google Sheets (Job Tracker)
         ↓
 Email Summary Notification
+```
 
 
 ## Workflow Overview
