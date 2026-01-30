@@ -46,6 +46,8 @@ Google Sheets (Job Tracker)
         ↓
 Email Summary Notification
 ```
+<img width="1748" height="722" alt="image" src="https://github.com/user-attachments/assets/efba23b8-c6c5-4088-974c-b155064faebd" />
+
 
 
 ## Workflow Overview
